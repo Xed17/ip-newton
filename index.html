@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interpolación Polinomial de Newton — Solucionador General</title>
+    <meta name="description" content="Calculadora general de interpolación polinomial de Newton con diferencias divididas, evaluación analítica de cualquier grado y gráfica interactiva.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- KaTeX para renderizado matemático elegante tipo LaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Encabezado minimalista -->
+        <header class="top-nav">
+            <div class="nav-brand">
+                <span class="badge-tag">Métodos Numéricos</span>
+                <h1>Interpolación Polinomial de Newton</h1>
+            </div>
+            <div class="nav-context">
+                <span>Solucionador General por Diferencias Divididas</span>
+            </div>
+        </header>
+
+        <!-- Contenedor principal de 2 columnas -->
+        <main class="dashboard-grid">
+            <!-- COLUMNA IZQUIERDA: Entradas, Resultado Principal y Polinomios -->
+            <section class="column-left">
+                <!-- Tarjeta: Entrada de datos -->
+                <article class="panel">
+                    <div class="panel-header">
+                        <h2>1. Nodos de Interpolación</h2>
+                        <span class="panel-subtitle">Entrada vectorial de puntos \((x_i, y_i)\)</span>
+                    </div>
+
+                    <form id="formInterpolacion" class="form-grid" onsubmit="event.preventDefault();">
+                        <div class="form-group">
+                            <label for="vectorX">
+                                Vector de nodos \(X = [x_0, x_1, \dots, x_n]\)
+                            </label>
+                            <input 
+                                id="vectorX" 
+                                type="text" 
+                                value="1, 2, 4, 7" 
+                                placeholder="Ej: 1, 2, 4, 7 ó -1.5, 0, 2.3, 5" 
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                            <span class="help-text">Acepta comas, espacios o saltos de línea (pegar de Excel)</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="vectorY">
+                                Vector de valores \(Y = [y_0, y_1, \dots, y_n]\)
+                            </label>
+                            <input 
+                                id="vectorY" 
+                                type="text" 
+                                value="45, 65, 110, 220" 
+                                placeholder="Ej: 45, 65, 110, 220 ó -3, 5.2, 8, 12" 
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                            <span class="help-text">Valores correspondientes \(y_i = f(x_i)\)</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="valorEvaluar">
+                                Punto a evaluar \(x\)
+                            </label>
+                            <input 
+                                id="valorEvaluar" 
+                                type="number" 
+                                value="5" 
+                                step="any"
+                                placeholder="Ej: 5"
+                            >
+                            <span class="help-text">Valor donde se evaluará el polinomio \(P_n(x)\)</span>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" for="checkOrdenarX">
+                                <input type="checkbox" id="checkOrdenarX" checked>
+                                Ordenar pares \((x_i, y_i)\) por \(x_i\) ascendente
+                            </label>
+                        </div>
+
+                        <div class="actions-group">
+                            <button type="button" id="btnResolver" class="btn btn-primary">
+                                Resolver Interpolación
+                            </button>
+                            <button type="button" id="btnEjemplo" class="btn btn-outline">
+                                Cargar Ejemplo
+                            </button>
+                            <button type="button" id="btnLimpiar" class="btn btn-outline">
+                                Limpiar
+                            </button>
+                        </div>
+                    </form>
+
+                    <div id="mensajeAlerta" class="alert-message hidden" role="alert"></div>
+                </article>
+
+                <!-- Tarjeta: Resultado Destacado -->
+                <article id="panelResultado" class="panel panel-result">
+                    <div class="panel-header">
+                        <h2>2. Evaluación del Polinomio</h2>
+                        <span id="badgeGrado" class="badge-info">Grado n = 3</span>
+                    </div>
+
+                    <div class="result-metric">
+                        <div class="metric-meta">
+                            <span class="metric-label">Valor Evaluado \(P_n(x)\)</span>
+                            <div class="metric-main">
+                                <span id="resultadoLatencia" class="metric-value">—</span>
+                            </div>
+                        </div>
+                        <div class="metric-detail">
+                            <span id="resultadoCarga" class="detail-tag">x = —</span>
+                            <span id="badgeTipoEvaluacion" class="detail-badge success">Interpolación</span>
+                        </div>
+                    </div>
+
+                    <p id="explicacionResultado" class="result-summary"></p>
+                </article>
+
+                <!-- Tarjeta: Polinomio Interpolante -->
+                <article id="panelPolinomios" class="panel">
+                    <div class="panel-header">
+                        <h2>3. Polinomio Interpolante</h2>
+                        <span class="panel-subtitle">Expresiones matemáticas obtenidas</span>
+                    </div>
+
+                    <div class="math-block">
+                        <div class="math-title">
+                            <span>Forma de Newton con Diferencias Divididas</span>
+                        </div>
+                        <div id="polinomioNewtonKatex" class="math-display"></div>
+                        <div id="polinomioNewtonFallback" class="math-code hidden"></div>
+                    </div>
+
+                    <div class="math-block">
+                        <div class="math-title">
+                            <span>Forma Polinomial Estándar Expandida</span>
+                        </div>
+                        <div id="polinomioEstandarKatex" class="math-display"></div>
+                        <div id="polinomioEstandarFallback" class="math-code hidden"></div>
+                    </div>
+                </article>
+            </section>
+
+            <!-- COLUMNA DERECHA: Gráfica Canvas Interactiva y Tablas de Detalle -->
+            <section class="column-right">
+                <!-- Tarjeta: Gráfica Interactiva -->
+                <article class="panel panel-chart">
+                    <div class="panel-header chart-header">
+                        <div>
+                            <h2>4. Gráfica del Polinomio</h2>
+                            <span class="panel-subtitle">Curva continua \(P_n(x)\) y nodos de interpolación</span>
+                        </div>
+                        <div class="chart-legend">
+                            <span class="legend-item"><span class="legend-dot dot-data"></span> Nodos \((x_i, y_i)\)</span>
+                            <span class="legend-item"><span class="legend-dot dot-curve"></span> Curva \(P_n(x)\)</span>
+                            <span class="legend-item"><span class="legend-dot dot-eval"></span> Punto \((x, P(x))\)</span>
+                        </div>
+                    </div>
+
+                    <div class="canvas-wrapper">
+                        <canvas id="graficaLatencia" width="800" height="420"></canvas>
+                        <div id="chartTooltip" class="chart-tooltip hidden"></div>
+                    </div>
+                </article>
+
+                <!-- Tarjeta: Tabla de Diferencias Divididas -->
+                <article class="panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>5. Tabla de Diferencias Divididas</h2>
+                            <span class="panel-subtitle">La primera fila (resaltada) define los coeficientes \(c_i\) de Newton</span>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="tablaDiferencias" class="clean-table">
+                            <thead></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </article>
+
+                <!-- Tarjeta: Validación Teórica -->
+                <article class="panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>6. Validación de Nodos</h2>
+                            <span class="panel-subtitle">Comprobación exacta de paso: \(P_n(x_i) = y_i\)</span>
+                        </div>
+                        <span id="badgeValidacionGlobal" class="badge-success">Validación exitosa</span>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="tablaValidacion" class="clean-table">
+                            <thead>
+                                <tr>
+                                    <th>Punto \(i\)</th>
+                                    <th>Nodo \(x_i\)</th>
+                                    <th>\(y_i\) dato</th>
+                                    <th>\(P_n(x_i)\) calculado</th>
+                                    <th>Error \(|y_i - P_n(x_i)|\)</th>
+                                    <th>Estado</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <p id="mensajeValidacionTexto" class="validation-note"></p>
+                </article>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
