@@ -39,6 +39,20 @@
 
                     <form id="formInterpolacion" class="form-grid" onsubmit="event.preventDefault();">
                         <div class="form-group">
+                            <label>Método de Interpolación</label>
+                            <div class="method-selector" id="selectorMetodo">
+                                <button type="button" class="method-btn active" data-method="divididas">Newton Divididas</button>
+                                <button type="button" class="method-btn" data-method="ng-adelante">Newton-Gregory Adelante (Δ)</button>
+                                <button type="button" class="method-btn" data-method="ng-atras">Newton-Gregory Atrás (∇)</button>
+                                <button type="button" class="method-btn" data-method="auto">Automático</button>
+                            </div>
+                            <div class="step-indicator" id="indicadorPasoH">
+                                <span class="badge-step" id="badgePasoH">Paso h = —</span>
+                                <span class="step-text" id="textoPasoH"></span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
                             <label for="vectorX">
                                 Vector de nodos \(X = [x_0, x_1, \dots, x_n]\)
                             </label>
@@ -90,12 +104,58 @@
                             </label>
                         </div>
 
+                        <!-- Sección opcional: Función analítica f(x) y Cota de Error -->
+                        <div class="optional-section">
+                            <button type="button" class="btn-toggle-optional" id="btnToggleOpcional" aria-expanded="false">
+                                <span class="toggle-icon" id="iconoToggleOpcional">▸</span>
+                                <span>Función Analítica y Cota de Error (Opcional)</span>
+                            </button>
+                            <div class="optional-content hidden" id="contenidoOpcional">
+                                <div class="form-group">
+                                    <div class="label-with-action">
+                                        <label for="funcionFx">Función analítica \(f(x)\)</label>
+                                        <button type="button" id="btnGenerarY" class="btn-text-action" title="Evalúa f(x) en los nodos x_i para rellenar el vector Y">
+                                            Calcular \(Y = f(X)\)
+                                        </button>
+                                    </div>
+                                    <input 
+                                        id="funcionFx" 
+                                        type="text" 
+                                        placeholder="Ej: (3 + x)/(1 + x) ó sin(x) ó exp(x)" 
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    >
+                                    <span class="help-text">Permite calcular el error real \(|f(x) - P(x)|\) y estimar \(\max |f^{(n+1)}(t)|\)</span>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="cotaDerivadaM">
+                                        Cota de la derivada \(M_{n+1} = \max_{a \le t \le b} |f^{(n+1)}(t)|\)
+                                    </label>
+                                    <input 
+                                        id="cotaDerivadaM" 
+                                        type="text" 
+                                        placeholder="Vacío para auto-estimar de f(x) o ingresar número/cota" 
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    >
+                                    <span class="help-text">Deje vacío si proporcionó \(f(x)\), o ingrese la cota dada en el problema</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="actions-group">
                             <button type="button" id="btnResolver" class="btn btn-primary">
                                 Resolver Interpolación
                             </button>
-                            <button type="button" id="btnEjemplo" class="btn btn-outline">
-                                Cargar Ejemplo
+                            <button type="button" id="btnEjemploError" class="btn btn-outline" title="Carga el ejemplo de la clase: f(x) = (3+x)/(1+x) en x=[0.1, 0.2, 0.4] con x=0.25">
+                                Ejemplo Cota Error (Slide)
+                            </button>
+                            <button type="button" id="btnEjemploEqui" class="btn btn-outline" title="Carga un caso con nodos equiespaciados (h = 1) para Newton-Gregory">
+                                Ejemplo Equiespaciado
+                            </button>
+                            <button type="button" id="btnEjemplo" class="btn btn-outline" title="Carga el ejemplo base">
+                                Ejemplo Base
                             </button>
                             <button type="button" id="btnLimpiar" class="btn btn-outline">
                                 Limpiar
@@ -115,13 +175,14 @@
 
                     <div class="result-metric">
                         <div class="metric-meta">
-                            <span class="metric-label">Valor Evaluado \(P_n(x)\)</span>
+                            <span class="metric-label" id="labelValorEvaluado">Valor Evaluado \(P_n(x)\)</span>
                             <div class="metric-main">
                                 <span id="resultadoLatencia" class="metric-value">—</span>
                             </div>
                         </div>
                         <div class="metric-detail">
                             <span id="resultadoCarga" class="detail-tag">x = —</span>
+                            <span id="badgeParametroS" class="detail-tag hidden">s = —</span>
                             <span id="badgeTipoEvaluacion" class="detail-badge success">Interpolación</span>
                         </div>
                     </div>
@@ -129,16 +190,67 @@
                     <p id="explicacionResultado" class="result-summary"></p>
                 </article>
 
-                <!-- Tarjeta: Polinomio Interpolante -->
-                <article id="panelPolinomios" class="panel">
+                <!-- Tarjeta: Estimación del Límite Superior de Error -->
+                <article id="panelLimiteError" class="panel">
                     <div class="panel-header">
-                        <h2>3. Polinomio Interpolante</h2>
-                        <span class="panel-subtitle">Expresiones matemáticas obtenidas</span>
+                        <div>
+                            <h2>3. Límite Superior del Error</h2>
+                            <span class="panel-subtitle">Teorema del error de truncamiento por interpolación</span>
+                        </div>
+                        <span id="badgeEstadoError" class="badge-info">Teórico</span>
                     </div>
 
                     <div class="math-block">
                         <div class="math-title">
-                            <span>Forma de Newton con Diferencias Divididas</span>
+                            <span>Fórmula del Teorema del Error</span>
+                        </div>
+                        <div id="formulaErrorTeoremaKatex" class="math-display"></div>
+                        <div id="formulaErrorSustituidaKatex" class="math-display"></div>
+                    </div>
+
+                    <div class="error-metrics-grid">
+                        <div class="error-card">
+                            <span class="error-card-label">Término de Nodos \(\frac{\prod |x - x_i|}{(n+1)!}\)</span>
+                            <span id="valTerminoNodos" class="error-card-value">—</span>
+                            <span id="subTerminoNodos" class="error-card-sub"></span>
+                        </div>
+                        <div class="error-card">
+                            <span class="error-card-label">Cota Derivada \(M_{n+1}\)</span>
+                            <span id="valCotaDerivada" class="error-card-value">—</span>
+                            <span id="subCotaDerivada" class="error-card-sub"></span>
+                        </div>
+                        <div class="error-card highlight-bound">
+                            <span class="error-card-label">Límite Superior Teórico</span>
+                            <span id="valCotaTeorica" class="error-card-value">—</span>
+                            <span id="subCotaTeorica" class="error-card-sub">\(|E_n(x)| \le \dots\)</span>
+                        </div>
+                        <div class="error-card" id="cardErrorReal">
+                            <span class="error-card-label">Error Real \(E_a = |f(x) - P(x)|\)</span>
+                            <span id="valErrorReal" class="error-card-value">—</span>
+                            <span id="subErrorReal" class="error-card-sub"></span>
+                        </div>
+                    </div>
+
+                    <div class="error-breakdown-box" id="desglosePasosError">
+                        <h4 class="breakdown-title">Desglose de Factores y Sustitución:</h4>
+                        <ul class="breakdown-list" id="listaFactoresError"></ul>
+                    </div>
+
+                    <div class="error-note-box" id="notaPedagogicaError">
+                        <p id="textoDigitosSignificativos" class="validation-note"></p>
+                    </div>
+                </article>
+
+                <!-- Tarjeta: Polinomio Interpolante -->
+                <article id="panelPolinomios" class="panel">
+                    <div class="panel-header">
+                        <h2>4. Polinomio Interpolante</h2>
+                        <span class="panel-subtitle" id="subtituloPolinomios">Expresiones matemáticas obtenidas</span>
+                    </div>
+
+                    <div class="math-block">
+                        <div class="math-title">
+                            <span id="tituloPolinomioNewton">Forma de Newton / Newton-Gregory</span>
                         </div>
                         <div id="polinomioNewtonKatex" class="math-display"></div>
                         <div id="polinomioNewtonFallback" class="math-code hidden"></div>
@@ -160,7 +272,7 @@
                 <article class="panel panel-chart">
                     <div class="panel-header chart-header">
                         <div>
-                            <h2>4. Gráfica del Polinomio</h2>
+                            <h2>5. Gráfica del Polinomio</h2>
                             <span class="panel-subtitle">Curva continua \(P_n(x)\) y nodos de interpolación</span>
                         </div>
                         <div class="chart-legend">
@@ -180,8 +292,8 @@
                 <article class="panel">
                     <div class="panel-header">
                         <div>
-                            <h2>5. Tabla de Diferencias Divididas</h2>
-                            <span class="panel-subtitle">La primera fila (resaltada) define los coeficientes \(c_i\) de Newton</span>
+                            <h2 id="tituloTablaDiferencias">6. Tabla de Diferencias</h2>
+                            <span class="panel-subtitle" id="subtituloTablaDiferencias">Coeficientes del polinomio</span>
                         </div>
                     </div>
 
@@ -197,7 +309,7 @@
                 <article class="panel">
                     <div class="panel-header">
                         <div>
-                            <h2>6. Validación de Nodos</h2>
+                            <h2>7. Validación de Nodos</h2>
                             <span class="panel-subtitle">Comprobación exacta de paso: \(P_n(x_i) = y_i\)</span>
                         </div>
                         <span id="badgeValidacionGlobal" class="badge-success">Validación exitosa</span>
