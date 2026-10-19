@@ -1,13 +1,11 @@
 /**
  * ============================================================================
  * INTERPOLACIÓN POLINOMIAL DE NEWTON (DIFERENCIAS DIVIDIDAS)
- * Solucionador General para Métodos Numéricos
+ * Solucionador General de Métodos Numéricos con Aritmética Exacta de Fracciones
  * ============================================================================
  */
 
 "use strict";
-
-const EPSILON = 1e-9;
 
 // Elementos del DOM
 const el = {
@@ -50,7 +48,7 @@ let chartState = {
     X: [],
     Y: [],
     coeficientes: [],
-    valorEvaluar: 0,
+    valorEvaluar: null,
     muestras: [],
     xMin: 0,
     xMax: 0,
@@ -82,19 +80,199 @@ if (el.checkOrdenarX) {
 });
 
 /* ==========================================================================
-   1. PARSEO Y VALIDACIÓN DE DATOS (FLEXIBLE PARA CUALQUIER PROBLEMA)
+   1. CLASE FRACCIÓN PARA ARITMÉTICA RACIONAL EXACTA (BIGINT)
    ========================================================================== */
 
 /**
- * Parsea un vector numérico aceptando comas, espacios, punto y coma, tabuladores y saltos de línea.
+ * Algoritmo de Euclides para el Máximo Común Divisor con BigInt.
+ */
+function mcd(a, b) {
+    a = a < 0n ? -a : a;
+    b = b < 0n ? -b : b;
+    while (b !== 0n) {
+        const t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
+class Fraccion {
+    constructor(num, den = 1n) {
+        if (typeof num === "number") num = BigInt(Math.round(num));
+        else if (typeof num === "string") num = BigInt(num);
+        if (typeof den === "number") den = BigInt(Math.round(den));
+        else if (typeof den === "string") den = BigInt(den);
+
+        if (den === 0n) {
+            throw new Error("División por cero en el cálculo fraccionario.");
+        }
+
+        if (den < 0n) {
+            num = -num;
+            den = -den;
+        }
+
+        const g = mcd(num, den);
+        this.num = num / g;
+        this.den = den / g;
+    }
+
+    add(other) {
+        return new Fraccion(
+            this.num * other.den + other.num * this.den,
+            this.den * other.den
+        );
+    }
+
+    sub(other) {
+        return new Fraccion(
+            this.num * other.den - other.num * this.den,
+            this.den * other.den
+        );
+    }
+
+    mul(other) {
+        return new Fraccion(
+            this.num * other.num,
+            this.den * other.den
+        );
+    }
+
+    div(other) {
+        if (other.num === 0n) {
+            throw new Error("División por cero.");
+        }
+        return new Fraccion(
+            this.num * other.den,
+            this.den * other.num
+        );
+    }
+
+    neg() {
+        return new Fraccion(-this.num, this.den);
+    }
+
+    abs() {
+        return new Fraccion(this.num < 0n ? -this.num : this.num, this.den);
+    }
+
+    isZero() {
+        return this.num === 0n;
+    }
+
+    isNegative() {
+        return this.num < 0n;
+    }
+
+    equals(other) {
+        return this.num === other.num && this.den === other.den;
+    }
+
+    toNumber() {
+        return Number(this.num) / Number(this.den);
+    }
+
+    toLatex() {
+        if (this.den === 1n) return this.num.toString();
+        const sign = this.num < 0n ? "-" : "";
+        const absNum = this.num < 0n ? -this.num : this.num;
+        return `${sign}\\frac{${absNum}}{${this.den}}`;
+    }
+
+    toString() {
+        if (this.den === 1n) return this.num.toString();
+        return `${this.num}/${this.den}`;
+    }
+
+    toDecimalString(maxDec = 6) {
+        if (this.den === 1n) return this.num.toString();
+        const val = this.toNumber();
+        if (Math.abs(val) < 1e-5 || Math.abs(val) >= 1e7) {
+            return val.toExponential(4).replace("e+", "e");
+        }
+        return parseFloat(val.toFixed(maxDec)).toString();
+    }
+}
+
+/* ==========================================================================
+   2. PARSEO DE FRACCIONES Y NÚMEROS ARBITRARIOS (SIN PÉRDIDA DE PRECISIÓN)
+   ========================================================================== */
+
+/**
+ * Convierte cualquier representación de texto a una Fracción exacta:
+ * - Enteros: "45", "-7"
+ * - Fracciones explícitas: "1/3", "-5/6"
+ * - Decimales de cualquier longitud: "0.0000000003" -> 3/10000000000
+ * - Notación científica: "3e-10", "1.5e-3"
+ */
+function parsearFraccion(texto) {
+    if (!texto || typeof texto !== "string") {
+        throw new Error("Valor vacío o inválido.");
+    }
+    texto = texto.trim();
+
+    // 1. Fracción con barra inclinada
+    if (texto.includes("/")) {
+        const partes = texto.split("/");
+        if (partes.length !== 2) {
+            throw new Error(`Fracción mal formada: "${texto}".`);
+        }
+        const fNum = parsearFraccion(partes[0]);
+        const fDen = parsearFraccion(partes[1]);
+        return fNum.div(fDen);
+    }
+
+    // 2. Notación científica (ej. 3e-10)
+    if (texto.toLowerCase().includes("e")) {
+        const [mantisa, expStr] = texto.toLowerCase().split("e");
+        const fMantisa = parsearFraccion(mantisa);
+        const exp = parseInt(expStr, 10);
+        if (isNaN(exp)) {
+            throw new Error(`Exponente científico inválido en: "${texto}".`);
+        }
+        if (exp >= 0) {
+            return fMantisa.mul(new Fraccion(10n ** BigInt(exp)));
+        } else {
+            return fMantisa.div(new Fraccion(10n ** BigInt(-exp)));
+        }
+    }
+
+    // 3. Número decimal exacto (ej. 0.0000000003)
+    if (texto.includes(".")) {
+        let neg = false;
+        if (texto.startsWith("-")) {
+            neg = true;
+            texto = texto.slice(1);
+        } else if (texto.startsWith("+")) {
+            texto = texto.slice(1);
+        }
+
+        const [entero, decimales] = texto.split(".");
+        const entStr = entero === "" ? "0" : entero;
+        const numStr = entStr + decimales;
+        const num = BigInt(numStr);
+        const den = 10n ** BigInt(decimales.length);
+        const f = new Fraccion(num, den);
+        return neg ? f.neg() : f;
+    }
+
+    // 4. Entero
+    return new Fraccion(BigInt(texto), 1n);
+}
+
+/**
+ * Parsea un vector de texto aceptando comas, espacios, saltos de línea y tabuladores.
  */
 function parsearVector(cadena) {
     if (!cadena || typeof cadena !== "string") return [];
-    return cadena
+    // Normaliza espacios alrededor de barras de fracción: "1 / 2" -> "1/2"
+    const normalizada = cadena.replace(/\s*\/\s*/g, "/");
+    return normalizada
         .trim()
         .split(/[\s,;\n\t]+/)
         .filter(v => v !== "")
-        .map(v => Number(v));
+        .map(v => parsearFraccion(v));
 }
 
 function validarEntradas(X, Y, valorEvaluar) {
@@ -106,31 +284,26 @@ function validarEntradas(X, Y, valorEvaluar) {
         throw new Error(`Los vectores deben tener la misma cantidad de elementos: el vector X tiene ${X.length} nodos y el vector Y tiene ${Y.length} valores.`);
     }
 
-    if (X.some(val => !Number.isFinite(val))) {
-        throw new Error("El vector X contiene elementos no numéricos, caracteres inválidos o valores infinitos.");
-    }
-
-    if (Y.some(val => !Number.isFinite(val))) {
-        throw new Error("El vector Y contiene elementos no numéricos, caracteres inválidos o valores infinitos.");
-    }
-
-    if (!Number.isFinite(valorEvaluar)) {
-        throw new Error("El punto a evaluar x no es un número válido.");
+    if (!(valorEvaluar instanceof Fraccion)) {
+        throw new Error("El punto a evaluar x no es una fracción o número válido.");
     }
 
     // Verificar nodos duplicados en X (división entre cero en diferencias divididas)
-    const setX = new Set(X);
-    if (setX.size !== X.length) {
-        throw new Error("El vector X contiene nodos repetidos. En la interpolación de Newton, todos los x_i deben ser distintos para evitar división entre cero en las diferencias divididas.");
+    for (let i = 0; i < X.length; i++) {
+        for (let j = i + 1; j < X.length; j++) {
+            if (X[i].equals(X[j])) {
+                throw new Error(`El vector X contiene nodos repetidos (${X[i].toString()}). Todos los nodos x_i deben ser distintos para evitar división entre cero.`);
+            }
+        }
     }
 }
 
 /* ==========================================================================
-   2. ALGORITMOS NUMÉRICOS DE NEWTON
+   3. ALGORITMOS NUMÉRICOS DE NEWTON CON FRACCIONES EXACTAS
    ========================================================================== */
 
 /**
- * Construye la tabla triangular de diferencias divididas de orden O(n^2).
+ * Construye la tabla triangular de diferencias divididas de orden O(n^2) con fracciones exactas.
  * tabla[i][j] = f[x_i, ..., x_{i+j}]
  * La primera fila tabla[0][j] corresponde a los coeficientes de Newton c_j.
  */
@@ -146,9 +319,9 @@ function calcularDiferenciasDivididas(X, Y) {
     // Columnas 1 a n-1: diferencias divididas de orden k
     for (let orden = 1; orden < n; orden++) {
         for (let i = 0; i < n - orden; i++) {
-            const numerador = tabla[i + 1][orden - 1] - tabla[i][orden - 1];
-            const denominador = X[i + orden] - X[i];
-            tabla[i][orden] = numerador / denominador;
+            const numerador = tabla[i + 1][orden - 1].sub(tabla[i][orden - 1]);
+            const denominador = X[i + orden].sub(X[i]);
+            tabla[i][orden] = numerador.div(denominador);
         }
     }
 
@@ -164,75 +337,59 @@ function evaluarNewton(X, coeficientes, x) {
     let resultado = coeficientes[n - 1];
 
     for (let i = n - 2; i >= 0; i--) {
-        resultado = coeficientes[i] + (x - X[i]) * resultado;
+        const factor = x.sub(X[i]);
+        resultado = coeficientes[i].add(factor.mul(resultado));
     }
 
     return resultado;
 }
 
 /**
- * Expansión algebraica del polinomio a forma estándar:
+ * Expansión algebraica del polinomio a forma estándar con fracciones exactas:
  * P(x) = a_n * x^n + ... + a_1 * x + a_0
  */
-function sumarPolinomios(p1, p2) {
+function sumarPolinomiosFrac(p1, p2) {
     const longitud = Math.max(p1.length, p2.length);
-    const resultado = Array(longitud).fill(0);
+    const resultado = [];
     for (let i = 0; i < longitud; i++) {
-        resultado[i] = (p1[i] || 0) + (p2[i] || 0);
+        const v1 = p1[i] || new Fraccion(0n);
+        const v2 = p2[i] || new Fraccion(0n);
+        resultado.push(v1.add(v2));
     }
     return resultado;
 }
 
-function multiplicarPorFactor(polinomio, raiz) {
+function multiplicarPorFactorFrac(polinomio, raiz) {
     // Multiplica polinomio por (x - raiz)
-    const resultado = Array(polinomio.length + 1).fill(0);
+    const resultado = Array.from({ length: polinomio.length + 1 }, () => new Fraccion(0n));
     for (let i = 0; i < polinomio.length; i++) {
-        resultado[i] += -raiz * polinomio[i];
-        resultado[i + 1] += polinomio[i];
+        const prod = polinomio[i].mul(raiz.neg());
+        resultado[i] = resultado[i].add(prod);
+        resultado[i + 1] = resultado[i + 1].add(polinomio[i]);
     }
     return resultado;
 }
 
 function obtenerPolinomioEstandar(X, coeficientes) {
-    let acumulado = [0];
-    let productoBase = [1];
+    let acumulado = [new Fraccion(0n)];
+    let productoBase = [new Fraccion(1n)];
 
     for (let i = 0; i < coeficientes.length; i++) {
         const ci = coeficientes[i];
-        const termino = productoBase.map(c => c * ci);
-        acumulado = sumarPolinomios(acumulado, termino);
-        productoBase = multiplicarPorFactor(productoBase, X[i]);
+        const termino = productoBase.map(c => c.mul(ci));
+        acumulado = sumarPolinomiosFrac(acumulado, termino);
+        productoBase = multiplicarPorFactorFrac(productoBase, X[i]);
     }
 
-    return acumulado; // [a_0, a_1, a_2, ..., a_n]
+    return acumulado; // [a_0, a_1, a_2, ..., a_n] en Fraccion
 }
 
 /* ==========================================================================
-   3. FORMATEO MATEMÁTICO INTELIGENTE (6 DECIMALES FIJOS)
+   4. FORMATEO MATEMÁTICO EN LATEX / KATEX Y TEXTO PLANO
    ========================================================================== */
 
-function limpiarCero(num) {
-    return Math.abs(num) < EPSILON ? 0 : num;
-}
-
 /**
- * Formateo inteligente adaptable: 6 decimales fijos o notación científica para valores extremos.
- */
-function formatearNumero(num, maxDec = 6) {
-    const limpio = limpiarCero(num);
-    if (limpio === 0) return "0";
-    if (Number.isInteger(limpio)) return limpio.toString();
-
-    const absVal = Math.abs(limpio);
-    if (absVal < 1e-5 || absVal >= 1e7) {
-        return limpio.toExponential(4).replace("e+", "e");
-    }
-
-    return parseFloat(limpio.toFixed(maxDec)).toString();
-}
-
-/**
- * Genera el string LaTeX y texto plano para la forma de Newton.
+ * Genera el string LaTeX y texto plano para la forma de Newton con fracciones exactas.
  */
 function generarFormaNewton(X, coeficientes) {
     const n = coeficientes.length;
@@ -240,37 +397,40 @@ function generarFormaNewton(X, coeficientes) {
     const partesPlanas = [];
 
     for (let i = 0; i < n; i++) {
-        const c = limpiarCero(coeficientes[i]);
-        if (c === 0 && i > 0) continue;
+        const c = coeficientes[i];
+        if (c.isZero() && i > 0) continue;
 
-        const cAbs = Math.abs(c);
-        const cStr = formatearNumero(cAbs);
+        const cAbs = c.abs();
+        const esUnoConFactores = (cAbs.num === 1n && cAbs.den === 1n && i > 0);
+        const cLatex = esUnoConFactores ? "" : cAbs.toLatex();
+        const cPlano = esUnoConFactores ? "" : (cAbs.den === 1n ? cAbs.num.toString() : `(${cAbs.toString()})`);
 
         let factoresLatex = "";
         let factoresPlanos = "";
 
         for (let j = 0; j < i; j++) {
-            const xj = limpiarCero(X[j]);
-            if (xj === 0) {
+            const xj = X[j];
+            if (xj.isZero()) {
                 factoresLatex += "x";
                 factoresPlanos += "x";
-            } else if (xj > 0) {
-                factoresLatex += `(x - ${formatearNumero(xj)})`;
-                factoresPlanos += `(x - ${formatearNumero(xj)})`;
+            } else if (xj.isNegative()) {
+                const xjAbs = xj.abs();
+                factoresLatex += `(x + ${xjAbs.toLatex()})`;
+                factoresPlanos += `(x + ${xjAbs.toString()})`;
             } else {
-                factoresLatex += `(x + ${formatearNumero(Math.abs(xj))})`;
-                factoresPlanos += `(x + ${formatearNumero(Math.abs(xj))})`;
+                factoresLatex += `(x - ${xj.toLatex()})`;
+                factoresPlanos += `(x - ${xj.toString()})`;
             }
         }
 
-        const terminoLatex = (factoresLatex === "") ? cStr : `${cStr}${factoresLatex}`;
-        const terminoPlano = (factoresPlanos === "") ? cStr : `${cStr} ${factoresPlanos}`;
+        const terminoLatex = (factoresLatex === "") ? cLatex : `${cLatex}${factoresLatex}`;
+        const terminoPlano = (factoresPlanos === "") ? cPlano : `${cPlano}${factoresPlanos}`;
 
         if (i === 0) {
-            partesLatex.push(c < 0 ? `-${terminoLatex}` : terminoLatex);
-            partesPlanas.push(c < 0 ? `-${terminoPlano}` : terminoPlano);
+            partesLatex.push(c.isNegative() ? `-${terminoLatex}` : terminoLatex);
+            partesPlanas.push(c.isNegative() ? `-${terminoPlano}` : terminoPlano);
         } else {
-            const signo = c < 0 ? "-" : "+";
+            const signo = c.isNegative() ? "-" : "+";
             partesLatex.push(`${signo} ${terminoLatex}`);
             partesPlanas.push(`${signo} ${terminoPlano}`);
         }
@@ -282,7 +442,7 @@ function generarFormaNewton(X, coeficientes) {
 }
 
 /**
- * Genera el string LaTeX y texto plano para la forma estándar.
+ * Genera el string LaTeX y texto plano para la forma estándar con fracciones exactas.
  */
 function generarFormaEstandar(polinomioEstandar) {
     const n = polinomioEstandar.length - 1;
@@ -290,12 +450,14 @@ function generarFormaEstandar(polinomioEstandar) {
     const partesPlanas = [];
 
     for (let i = n; i >= 0; i--) {
-        const coef = limpiarCero(polinomioEstandar[i]);
-        if (coef === 0) continue;
+        const coef = polinomioEstandar[i];
+        if (coef.isZero()) continue;
 
-        const coefAbs = Math.abs(coef);
-        let coefStr = formatearNumero(coefAbs);
-        if (coefAbs === 1 && i > 0) coefStr = "";
+        const coefAbs = coef.abs();
+        const esUno = coefAbs.num === 1n && coefAbs.den === 1n;
+
+        let coefLatex = esUno && i > 0 ? "" : coefAbs.toLatex();
+        let coefPlano = esUno && i > 0 ? "" : (coefAbs.den === 1n ? coefAbs.num.toString() : `(${coefAbs.toString()})`);
 
         let varLatex = "";
         let varPlana = "";
@@ -308,16 +470,16 @@ function generarFormaEstandar(polinomioEstandar) {
             varPlana = `x^${i}`;
         }
 
-        const terminoLatex = `${coefStr}${varLatex}`;
-        const terminoPlano = `${coefStr}${varPlana}`;
+        const terminoLatex = `${coefLatex}${varLatex}`;
+        const terminoPlano = `${coefPlano}${varPlana}`;
 
         const esPrimerTermino = partesLatex.length === 0;
 
         if (esPrimerTermino) {
-            partesLatex.push(coef < 0 ? `-${terminoLatex}` : terminoLatex);
-            partesPlanas.push(coef < 0 ? `-${terminoPlano}` : terminoPlano);
+            partesLatex.push(coef.isNegative() ? `-${terminoLatex}` : terminoLatex);
+            partesPlanas.push(coef.isNegative() ? `-${terminoPlano}` : terminoPlano);
         } else {
-            const signo = coef < 0 ? "-" : "+";
+            const signo = coef.isNegative() ? "-" : "+";
             partesLatex.push(`${signo} ${terminoLatex}`);
             partesPlanas.push(`${signo} ${terminoPlano}`);
         }
@@ -352,7 +514,7 @@ function renderizarFormulaMath(contenedorKatex, contenedorFallback, latex, plano
 }
 
 /* ==========================================================================
-   4. RENDERIZADO DE TABLAS
+   5. RENDERIZADO DE TABLAS
    ========================================================================== */
 
 function renderizarTablaDiferencias(X, tabla) {
@@ -387,7 +549,10 @@ function renderizarTablaDiferencias(X, tabla) {
         tr.appendChild(tdIdx);
 
         const tdX = document.createElement("td");
-        tdX.textContent = formatearNumero(X[i]);
+        tdX.textContent = X[i].toString();
+        if (X[i].den !== 1n) {
+            tdX.title = `≈ ${X[i].toDecimalString(6)}`;
+        }
         tr.appendChild(tdX);
 
         for (let orden = 0; orden < X.length; orden++) {
@@ -398,11 +563,14 @@ function renderizarTablaDiferencias(X, tabla) {
                 td.textContent = "—";
                 td.className = "empty-cell";
             } else {
-                td.textContent = formatearNumero(val);
-                // Si es la fila 0, resaltar porque es el coeficiente de Newton c_orden
+                td.textContent = val.toString();
+                if (val.den !== 1n) {
+                    td.title = `≈ ${val.toDecimalString(6)}`;
+                }
+                // Si es la fila 0, resaltar porque es el coeficiente c_orden de Newton
                 if (i === 0) {
                     td.classList.add("coeff-cell");
-                    td.title = `Coeficiente c_${orden} de Newton`;
+                    td.title = `Coeficiente c_${orden} = ${val.toString()}` + (val.den !== 1n ? ` (≈ ${val.toDecimalString(6)})` : "");
                 }
             }
             tr.appendChild(td);
@@ -417,30 +585,27 @@ function renderizarTablaValidacion(X, Y, coeficientes) {
     tbody.innerHTML = "";
 
     let todoExacto = true;
-    let maxError = 0;
 
     for (let i = 0; i < X.length; i++) {
         const xi = X[i];
         const yiOriginal = Y[i];
         const yiCalculado = evaluarNewton(X, coeficientes, xi);
-        const errorAbs = Math.abs(yiOriginal - yiCalculado);
+        const error = yiOriginal.sub(yiCalculado);
+        const esExacto = error.isZero();
 
-        if (errorAbs > maxError) maxError = errorAbs;
-
-        const esExacto = errorAbs < 1e-7;
         if (!esExacto) todoExacto = false;
 
         const tr = document.createElement("tr");
 
         tr.innerHTML = `
             <td>${i}</td>
-            <td>${formatearNumero(xi)}</td>
-            <td>${formatearNumero(yiOriginal)}</td>
-            <td>${formatearNumero(yiCalculado)}</td>
-            <td>${errorAbs < 1e-12 ? "0" : errorAbs.toExponential(2)}</td>
+            <td>${xi.toString()}</td>
+            <td>${yiOriginal.toString()}</td>
+            <td>${yiCalculado.toString()}</td>
+            <td>${error.isZero() ? "0" : error.abs().toString()}</td>
             <td>
                 <span class="${esExacto ? 'status-cell-pass' : 'status-cell-fail'}">
-                    ${esExacto ? '✓ Coincide exacto' : '✗ Discrepancia'}
+                    ${esExacto ? '✓ Exacto (error = 0)' : '✗ Discrepancia'}
                 </span>
             </td>
         `;
@@ -449,20 +614,20 @@ function renderizarTablaValidacion(X, Y, coeficientes) {
     }
 
     if (todoExacto) {
-        el.badgeValidacionGlobal.textContent = "Validación Exitosa";
+        el.badgeValidacionGlobal.textContent = "Validación Exacta";
         el.badgeValidacionGlobal.className = "badge-success";
         el.mensajeValidacionTexto.textContent = 
-            `El polinomio pasa exactamente por todos los ${X.length} puntos ingresados (|P_n(x_i) - y_i| < 1e-7). Comprobación superada.`;
+            `El polinomio reproduce con exactitud matemática absoluta todos los ${X.length} nodos (error = 0 sin pérdida de precisión).`;
     } else {
         el.badgeValidacionGlobal.textContent = "Revisar datos";
         el.badgeValidacionGlobal.className = "detail-badge warning";
         el.mensajeValidacionTexto.textContent = 
-            `Se detectaron discrepancias mayores a la tolerancia en los nodos. Verifique la entrada.`;
+            `Se detectaron diferencias en los nodos. Verifique la entrada.`;
     }
 }
 
 /* ==========================================================================
-   5. GRÁFICA CANVAS INTERACTIVA (HIDPI + TOOLTIP + GUÍAS)
+   6. GRÁFICA CANVAS INTERACTIVA (HIDPI + TOOLTIP + GUÍAS)
    ========================================================================== */
 
 function configurarCanvasHiDPI(canvas) {
@@ -484,23 +649,29 @@ function configurarCanvasHiDPI(canvas) {
 }
 
 function prepararDatosGrafica(X, Y, coeficientes, valorEvaluar) {
-    const xMinDatos = Math.min(...X);
-    const xMaxDatos = Math.max(...X);
+    const xNums = X.map(x => x.toNumber());
+    const yNums = Y.map(y => y.toNumber());
+    const evalNum = valorEvaluar.toNumber();
+
+    const xMinDatos = Math.min(...xNums);
+    const xMaxDatos = Math.max(...xNums);
     const margenX = Math.max((xMaxDatos - xMinDatos) * 0.12, 0.5);
 
-    const xMin = Math.min(xMinDatos, valorEvaluar) - margenX;
-    const xMax = Math.max(xMaxDatos, valorEvaluar) + margenX;
+    const xMin = Math.min(xMinDatos, evalNum) - margenX;
+    const xMax = Math.max(xMaxDatos, evalNum) + margenX;
 
     const muestras = [];
-    const numPuntos = 250;
+    const numPuntos = 260;
 
     for (let i = 0; i <= numPuntos; i++) {
-        const x = xMin + (xMax - xMin) * (i / numPuntos);
-        const y = evaluarNewton(X, coeficientes, x);
-        muestras.push({ x, y });
+        const xVal = xMin + (xMax - xMin) * (i / numPuntos);
+        // Evaluar con aproximación decimal para el Canvas
+        const xFrac = parsearFraccion(xVal.toFixed(10));
+        const yFrac = evaluarNewton(X, coeficientes, xFrac);
+        muestras.push({ x: xVal, y: yFrac.toNumber() });
     }
 
-    const yValores = [...Y, evaluarNewton(X, coeficientes, valorEvaluar), ...muestras.map(m => m.y)];
+    const yValores = [...yNums, evaluarNewton(X, coeficientes, valorEvaluar).toNumber(), ...muestras.map(m => m.y)];
     const yMinDatos = Math.min(...yValores);
     const yMaxDatos = Math.max(...yValores);
     const margenY = Math.max((yMaxDatos - yMinDatos) * 0.14, 1);
@@ -556,7 +727,7 @@ function redibujarGrafica() {
         ctx.font = "11px Inter, sans-serif";
         ctx.textAlign = "right";
         ctx.textBaseline = "middle";
-        ctx.fillText(formatearNumero(valY), m.izq - 8, py);
+        ctx.fillText(valY.toLocaleString("es-PE", { maximumFractionDigits: 3 }), m.izq - 8, py);
     }
 
     // Cuadrícula vertical (eje X)
@@ -574,7 +745,7 @@ function redibujarGrafica() {
         ctx.font = "11px Inter, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillText(formatearNumero(valX), px, h - m.inf + 8);
+        ctx.fillText(valX.toLocaleString("es-PE", { maximumFractionDigits: 3 }), px, h - m.inf + 8);
     }
 
     // 2. Ejes principales
@@ -591,7 +762,7 @@ function redibujarGrafica() {
     ctx.lineTo(m.izq, h - m.inf);
     ctx.stroke();
 
-    // Títulos de ejes generales
+    // Títulos de ejes
     ctx.fillStyle = "#64748b";
     ctx.font = "500 11.5px Inter, sans-serif";
     ctx.textAlign = "center";
@@ -620,9 +791,9 @@ function redibujarGrafica() {
     ctx.stroke();
 
     // 4. Guías punteadas al punto evaluado
-    const yEval = evaluarNewton(chartState.X, chartState.coeficientes, chartState.valorEvaluar);
-    const pxEval = toPxX(chartState.valorEvaluar);
-    const pyEval = toPxY(yEval);
+    const yEvalFrac = evaluarNewton(chartState.X, chartState.coeficientes, chartState.valorEvaluar);
+    const pxEval = toPxX(chartState.valorEvaluar.toNumber());
+    const pyEval = toPxY(yEvalFrac.toNumber());
 
     ctx.save();
     ctx.setLineDash([4, 4]);
@@ -636,32 +807,29 @@ function redibujarGrafica() {
     ctx.stroke();
     ctx.restore();
 
-    // 5. Nodos de interpolación (rojo con borde blanco)
+    // 5. Nodos de interpolación
     chartState.X.forEach((xi, i) => {
         const yi = chartState.Y[i];
-        const px = toPxX(xi);
-        const py = toPxY(yi);
+        const px = toPxX(xi.toNumber());
+        const py = toPxY(yi.toNumber());
 
-        // Aro exterior
         ctx.fillStyle = "#ffffff";
         ctx.beginPath();
         ctx.arc(px, py, 6, 0, Math.PI * 2);
         ctx.fill();
 
-        // Relleno
         ctx.fillStyle = "#ef4444";
         ctx.beginPath();
         ctx.arc(px, py, 4.5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Etiqueta
         ctx.fillStyle = "#475569";
         ctx.font = "500 11px Inter, sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText(`(${formatearNumero(xi)}, ${formatearNumero(yi)})`, px, py - 10);
+        ctx.fillText(`(${xi.toString()}, ${yi.toString()})`, px, py - 10);
     });
 
-    // 6. Punto evaluado destacado (verde esmeralda)
+    // 6. Punto evaluado destacado (verde)
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     ctx.arc(pxEval, pyEval, 7.5, 0, Math.PI * 2);
@@ -676,7 +844,7 @@ function redibujarGrafica() {
     ctx.font = "600 12px Inter, sans-serif";
     ctx.textAlign = "left";
     ctx.fillText(
-        `P(${formatearNumero(chartState.valorEvaluar)}) = ${formatearNumero(yEval)}`,
+        `P(${chartState.valorEvaluar.toString()}) = ${yEvalFrac.toString()}`,
         pxEval + 9,
         pyEval - 8
     );
@@ -721,14 +889,16 @@ el.canvas.addEventListener("mousemove", (e) => {
     }
 
     const xVal = chartState.xMin + ((mouseX - m.izq) / plotW) * (chartState.xMax - chartState.xMin);
-    const yVal = evaluarNewton(chartState.X, chartState.coeficientes, xVal);
+    const xFrac = parsearFraccion(xVal.toFixed(8));
+    const yFrac = evaluarNewton(chartState.X, chartState.coeficientes, xFrac);
 
     chartState.isHovering = true;
-    chartState.hoverPoint = { x: xVal, y: yVal };
+    chartState.hoverPoint = { x: xVal, y: yFrac.toNumber() };
 
     el.chartTooltip.style.left = `${mouseX}px`;
     el.chartTooltip.style.top = `${mouseY}px`;
-    el.chartTooltip.innerHTML = `<strong>x:</strong> ${formatearNumero(xVal)}<br><strong>P(x):</strong> ${formatearNumero(yVal)}`;
+    el.chartTooltip.innerHTML = `<strong>x:</strong> ${xVal.toFixed(4)}<br><strong>P(x):</strong> ${yFrac.toString()}` +
+        (yFrac.den !== 1n ? ` (≈ ${yFrac.toDecimalString(5)})` : "");
     el.chartTooltip.classList.remove("hidden");
 
     redibujarGrafica();
@@ -746,7 +916,7 @@ window.addEventListener("resize", () => {
 });
 
 /* ==========================================================================
-   6. CONTROLADOR PRINCIPAL: RESOLUCIÓN Y ACTUALIZACIÓN
+   7. CONTROLADOR PRINCIPAL: RESOLUCIÓN Y ACTUALIZACIÓN
    ========================================================================== */
 
 function mostrarMensajeError(msg) {
@@ -765,7 +935,7 @@ function resolverInterpolacion() {
     try {
         let X = parsearVector(el.vectorX.value);
         let Y = parsearVector(el.vectorY.value);
-        const valorEvaluar = Number(el.valorEvaluar.value);
+        const valorEvaluar = parsearFraccion(el.valorEvaluar.value);
 
         // 1. Validaciones
         validarEntradas(X, Y, valorEvaluar);
@@ -773,15 +943,18 @@ function resolverInterpolacion() {
         // 2. Ordenamiento opcional por x creciente
         if (el.checkOrdenarX && el.checkOrdenarX.checked) {
             const pares = X.map((xVal, idx) => ({ x: xVal, y: Y[idx] }));
-            pares.sort((a, b) => a.x - b.x);
+            pares.sort((a, b) => {
+                const diff = a.x.sub(b.x);
+                return diff.isNegative() ? -1 : diff.isZero() ? 0 : 1;
+            });
             X = pares.map(p => p.x);
             Y = pares.map(p => p.y);
-            // Actualizar campos si se ordenaron
-            el.vectorX.value = X.join(", ");
-            el.vectorY.value = Y.join(", ");
+            // Reflejar campos ordenados con formato de fracción
+            el.vectorX.value = X.map(x => x.toString()).join(", ");
+            el.vectorY.value = Y.map(y => y.toString()).join(", ");
         }
 
-        // 3. Tabla de diferencias divididas
+        // 3. Tabla de diferencias divididas con fracciones exactas
         const tabla = calcularDiferenciasDivididas(X, Y);
 
         // Coeficientes de Newton (primera fila c_j = tabla[0][j])
@@ -790,27 +963,46 @@ function resolverInterpolacion() {
         // 4. Evaluación en el punto solicitado x
         const valorInterpolado = evaluarNewton(X, coeficientes, valorEvaluar);
 
-        // 5. Polinomio estándar expandido
+        // 5. Polinomio estándar expandido con fracciones
         const polinomioEstandar = obtenerPolinomioEstandar(X, coeficientes);
 
         // 6. Actualizar métricas destacadas
         const grado = X.length - 1;
         el.badgeGrado.textContent = `Grado n = ${grado}`;
-        el.resultadoLatencia.textContent = formatearNumero(valorInterpolado);
-        el.resultadoCarga.textContent = `x = ${formatearNumero(valorEvaluar)}`;
 
-        const xMinDatos = Math.min(...X);
-        const xMaxDatos = Math.max(...X);
-        const esInterpolacion = (valorEvaluar >= xMinDatos && valorEvaluar <= xMaxDatos);
+        // Mostrar fracción en KaTeX o texto en la tarjeta destacada
+        if (valorInterpolado.den === 1n) {
+            el.resultadoLatencia.textContent = valorInterpolado.num.toString();
+        } else if (window.katex) {
+            try {
+                window.katex.render(valorInterpolado.toLatex(), el.resultadoLatencia, {
+                    displayMode: false,
+                    throwOnError: false
+                });
+            } catch (err) {
+                el.resultadoLatencia.textContent = valorInterpolado.toString();
+            }
+        } else {
+            el.resultadoLatencia.textContent = valorInterpolado.toString();
+        }
+
+        const evalDecStr = valorInterpolado.den !== 1n ? ` (≈ ${valorInterpolado.toDecimalString(6)})` : "";
+        el.resultadoCarga.textContent = `x = ${valorEvaluar.toString()}${evalDecStr}`;
+
+        const xNums = X.map(x => x.toNumber());
+        const xMinDatos = Math.min(...xNums);
+        const xMaxDatos = Math.max(...xNums);
+        const evalNum = valorEvaluar.toNumber();
+        const esInterpolacion = (evalNum >= xMinDatos && evalNum <= xMaxDatos);
 
         el.badgeTipoEvaluacion.textContent = esInterpolacion ? "Interpolación" : "Extrapolación";
         el.badgeTipoEvaluacion.className = `detail-badge ${esInterpolacion ? "success" : "warning"}`;
 
         el.explicacionResultado.textContent = esInterpolacion
-            ? `Para x = ${formatearNumero(valorEvaluar)}, el polinomio interpolante de grado ${grado} obtiene P(${formatearNumero(valorEvaluar)}) = ${formatearNumero(valorInterpolado)}. Se encuentra dentro del rango de nodos [${formatearNumero(xMinDatos)}, ${formatearNumero(xMaxDatos)}].`
-            : `Para x = ${formatearNumero(valorEvaluar)}, el polinomio obtiene P(${formatearNumero(valorEvaluar)}) = ${formatearNumero(valorInterpolado)}. Nota: se encuentra fuera del intervalo [${formatearNumero(xMinDatos)}, ${formatearNumero(xMaxDatos)}], por lo que corresponde a una extrapolación polinómica.`;
+            ? `Para x = ${valorEvaluar.toString()}, el polinomio interpolante exacto de grado ${grado} obtiene P(${valorEvaluar.toString()}) = ${valorInterpolado.toString()}${evalDecStr}. Se encuentra dentro del rango de nodos [${X[0].toString()}, ${X[X.length - 1].toString()}].`
+            : `Para x = ${valorEvaluar.toString()}, el polinomio obtiene P(${valorEvaluar.toString()}) = ${valorInterpolado.toString()}${evalDecStr}. Nota: se encuentra fuera del intervalo [${X[0].toString()}, ${X[X.length - 1].toString()}], por lo que corresponde a una extrapolación polinómica.`;
 
-        // 7. Fórmulas Matemáticas
+        // 7. Fórmulas Matemáticas con KaTeX y fallback
         const formaNewton = generarFormaNewton(X, coeficientes);
         renderizarFormulaMath(
             el.polinomioNewtonKatex,
